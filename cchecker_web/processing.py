@@ -9,17 +9,27 @@ import requests
 import json
 import subprocess
 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
+
 def compliance_check(job_id, dataset, checker):
+    '''
+    Perform compliance checking on a dataset
+
+    :param str job_id: Job identifier from redis
+    :param dataset: Dataset object to pass to compliance checker
+    :param str checker: Which checker to apply
+    '''
     try:
         redis = get_current_connection()
         cs = CheckSuite()
         if dataset.startswith('http'):
             dataset = check_redirect(dataset)
         ds = cs.load_dataset(dataset)
-        score_groups = cs.run(ds, checker)
+        score_groups = cs.run(ds, [], checker)
 
         rpair = score_groups[checker]
         groups, errors = rpair
@@ -41,10 +51,15 @@ def compliance_check(job_id, dataset, checker):
         redis.set('processing:job:%s' % job_id, buf, 3600)
         return True
     except Exception as e:
-        redis.set('processing:job:%s' % job_id, json.dumps({"error":type(e).__name__, "message":e.message}), 3600)
+        logger.exception("Failed to process job")
+        redis.set('processing:job:%s' % job_id, json.dumps({"error": type(e).__name__, "message": e.message}), 3600)
         return False
 
+
 def check_redirect(dataset, checked_urls=None):
+    '''
+    Allows the compliance checker to follow redirects
+    '''
     checked_urls = checked_urls or []
     if dataset in checked_urls:
         raise IOError("Invalid URL")
@@ -52,7 +67,7 @@ def check_redirect(dataset, checked_urls=None):
     response = requests.get(dataset + '.das', allow_redirects=False)
     if response.status_code == 301:
         new_location = response.headers['Location']
-        new_location = new_location.replace('.das','')
+        new_location = new_location.replace('.das', '')
         return check_redirect(new_location, checked_urls)
     return dataset
 
